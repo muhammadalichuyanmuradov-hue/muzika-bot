@@ -11,113 +11,123 @@ import yt_dlp
 from flask import Flask
 from threading import Thread
 
-# --- RENDER UYG'OQ TUTISH ---
+# ---------- KEEP ALIVE ----------
 app = Flask('')
 @app.route('/')
 def home():
-    return "Bot is Online"
+    return "🔥 Bot ishlayapti!"
 
 def run():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-# --- CONFIG ---
+# ---------- CONFIG ----------
 TOKEN = os.environ.get("BOT_TOKEN")
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 logging.basicConfig(level=logging.INFO)
 
-# --- STATE ---
+# ---------- STATE ----------
 class SearchState(StatesGroup):
-    waiting_music = State()
-    waiting_video = State()
+    music = State()
+    video = State()
 
-# --- MENU ---
-def get_menu():
-    buttons = [
-        [KeyboardButton(text="🎵 Musiqa topish")],
-        [KeyboardButton(text="🎬 Video topish")]
-    ]
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+# ---------- MENU ----------
+def menu():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🎵 Musiqa topish")],
+            [KeyboardButton(text="🎬 Video topish")]
+        ],
+        resize_keyboard=True
+    )
 
-# --- ENGINE ---
-class ImperatorEngine:
+# ---------- ENGINE ----------
+class Engine:
     def __init__(self):
         self.path = "downloads"
         if not os.path.exists(self.path):
             os.makedirs(self.path)
 
-    async def search_media(self, query, is_video=False):
-        search_engine = "ytsearch10"
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': True,
-        }
+    async def search(self, query):
+        ydl_opts = {'quiet': True, 'extract_flat': True}
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = await asyncio.to_thread(
+                data = await asyncio.to_thread(
                     ydl.extract_info,
-                    f"{search_engine}:{query}",
+                    f"ytsearch10:{query}",
                     download=False
                 )
                 return [
-                    {
-                        'id': e['id'],
-                        'title': e.get('title', 'Noma\'lum')[:40]
-                    }
-                    for e in info.get('entries', [])
+                    {'id': v['id'], 'title': v['title'][:40]}
+                    for v in data['entries']
                 ]
         except:
             return []
 
-    async def download_file(self, url, is_video=False):
-        filename = f"{self.path}/file_{int(time.time())}.{'mp4' if is_video else 'mp3'}"
+    async def download(self, url, is_video):
+        filename = f"{self.path}/{int(time.time())}.{'mp4' if is_video else 'mp3'}"
 
-        ydl_opts = {
-            'format': 'bestvideo[height<=480]+bestaudio/best' if is_video else 'bestaudio/best',
-            'outtmpl': filename,
-            'geo_bypass': True,
-            'nocheckcertificate': True,
-        }
+        if is_video:
+            opts = {
+                'format': 'bestvideo[height<=360]+bestaudio/best',
+                'merge_output_format': 'mp4',
+                'outtmpl': filename,
+                'noplaylist': True
+            }
+        else:
+            opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': filename,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+                'noplaylist': True
+            }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(opts) as ydl:
             await asyncio.to_thread(ydl.download, [url])
 
         return filename
 
-engine = ImperatorEngine()
+engine = Engine()
 
-# --- START ---
+# ---------- START ----------
 @dp.message(Command("start"))
 async def start(m: types.Message, state: FSMContext):
     await state.clear()
     await m.answer(
-        f"🌟 Salom, {m.from_user.first_name}!\nMedia botga xush kelibsiz!",
-        reply_markup=get_menu()
+        f"👋 Salom {m.from_user.first_name}!\n\n"
+        "🎧 Musiqa yoki 🎬 video yuklab beraman\n"
+        "👇 Quyidagidan tanlang:",
+        reply_markup=menu()
     )
 
-# --- MODES ---
+# ---------- MODE ----------
 @dp.message(F.text == "🎵 Musiqa topish")
-async def music_mode(m: types.Message, state: FSMContext):
-    await state.set_state(SearchState.waiting_music)
+async def music(m: types.Message, state: FSMContext):
+    await state.set_state(SearchState.music)
     await m.answer("🎵 Musiqa nomini yozing:")
 
 @dp.message(F.text == "🎬 Video topish")
-async def video_mode(m: types.Message, state: FSMContext):
-    await state.set_state(SearchState.waiting_video)
+async def video(m: types.Message, state: FSMContext):
+    await state.set_state(SearchState.video)
     await m.answer("🎬 Video nomini yozing:")
 
-# --- SEARCH ---
-@dp.message(SearchState.waiting_music)
-@dp.message(SearchState.waiting_video)
-async def process_search(m: types.Message, state: FSMContext):
-    is_video = (await state.get_state()) == SearchState.waiting_video
+# ---------- SEARCH ----------
+@dp.message(SearchState.music)
+@dp.message(SearchState.video)
+async def search(m: types.Message, state: FSMContext):
+    st = await state.get_state()
+    is_video = st == SearchState.video
 
-    wait = await m.answer("🔍 Qidirilmoqda...")
-    results = await engine.search_media(m.text, is_video)
+    msg = await m.answer("🔍 Qidirilmoqda...")
+
+    results = await engine.search(m.text)
 
     if not results:
-        return await wait.edit_text("❌ Hech narsa topilmadi.")
+        return await msg.edit_text("❌ Hech narsa topilmadi")
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -128,37 +138,51 @@ async def process_search(m: types.Message, state: FSMContext):
         ]
     )
 
-    await wait.delete()
-    await m.answer("✨ Topilgan natijalar:", reply_markup=kb)
+    await msg.delete()
+    await m.answer("✨ Tanlang:", reply_markup=kb)
 
-# --- DOWNLOAD ---
+# ---------- DOWNLOAD ----------
 @dp.callback_query(F.data.startswith("dl|"))
-async def handle_download(call: types.CallbackQuery):
-    _, f_type, f_id = call.data.split('|')
-    is_video = f_type == 'v'
-
-    url = f"https://www.youtube.com/watch?v={f_id}"
+async def download(call: types.CallbackQuery):
+    _, t, vid = call.data.split('|')
+    is_video = t == 'v'
+    url = f"https://www.youtube.com/watch?v={vid}"
 
     await call.message.edit_text("🚀 Yuklanmoqda...")
 
     try:
-        file_path = await engine.download_file(url, is_video)
+        file_path = await engine.download(url, is_video)
+
+        # size check
+        size = os.path.getsize(file_path) / (1024 * 1024)
+        if size > 49:
+            os.remove(file_path)
+            return await call.message.answer("❌ Fayl 50MB dan katta")
+
         file = FSInputFile(file_path)
 
         if is_video:
-            await call.message.answer_video(file, caption="✅ Tayyor!")
+            await call.message.answer_video(
+                file,
+                caption="🎬 Tayyor! 360p sifat"
+            )
         else:
-            await call.message.answer_audio(file, caption="🎵 Tayyor!")
+            await call.message.answer_audio(
+                file,
+                caption="🎧 MP3 tayyor!"
+            )
 
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
+        os.remove(file_path)
         await call.message.delete()
 
     except Exception as e:
-        await call.message.answer("⚠️ Xatolik! Fayl katta yoki yuklab bo‘lmadi.")
+        await call.message.answer("⚠️ Xatolik yuz berdi")
 
-# --- MAIN ---
+# ---------- EFFECT (typing) ----------
+async def typing_effect(chat_id):
+    await bot.send_chat_action(chat_id, "typing")
+
+# ---------- MAIN ----------
 async def main():
     Thread(target=run).start()
     await dp.start_polling(bot)
