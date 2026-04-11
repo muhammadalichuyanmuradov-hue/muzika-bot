@@ -17,7 +17,7 @@ def run():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
 # --- KONFIGURATSIYA ---
-TOKEN = "8566763003:AAHXP1TEgqchjRGB8yzghjB9z8HW58FdcpM"
+TOKEN = os.environ.get("BOT_TOKEN")
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 logging.basicConfig(level=logging.INFO)
