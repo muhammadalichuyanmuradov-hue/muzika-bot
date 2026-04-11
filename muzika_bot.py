@@ -11,7 +11,6 @@ import yt_dlp
 from flask import Flask
 from threading import Thread
 
-# ====================== CONFIG ======================
 TOKEN = os.environ.get("BOT_TOKEN")
 PROXY = os.environ.get("PROXY_URL")
 
@@ -20,7 +19,6 @@ dp = Dispatcher()
 
 logging.basicConfig(level=logging.INFO)
 
-# ====================== STATES & MENU ======================
 class SearchState(StatesGroup):
     music = State()
     video = State()
@@ -35,190 +33,128 @@ def main_menu():
         resize_keyboard=True
     )
 
-# ====================== ENGINE (Yaxshilangan) ======================
 class Engine:
     def __init__(self):
         self.path = "downloads"
         os.makedirs(self.path, exist_ok=True)
 
-    def get_ydl_opts(self, proxy=None):
-        opts = {
-            'quiet': True,
-            'noplaylist': True,
-            'retries': 5,
-            'fragment_retries': 5,
-            'ignoreerrors': True,
-            'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        }
-        if proxy:
-            opts['proxy'] = proxy
-        return opts
-
     async def search(self, query: str):
         results = []
-        ydl_opts = self.get_ydl_opts(PROXY)
+        ydl_opts = {'quiet': True, 'extract_flat': True, 'noplaylist': True}
+        if PROXY:
+            ydl_opts['proxy'] = PROXY
 
-        # YouTube
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 data = await asyncio.to_thread(ydl.extract_info, f"ytsearch5:{query}", download=False)
-                for entry in data.get('entries', [])[:5]:
-                    if entry and entry.get('id'):
+                for e in data.get('entries', [])[:6]:
+                    if e and e.get('id'):
                         results.append({
-                            'id': entry['id'],
-                            'title': f"🎬 {entry.get('title', 'No title')[:50]}",
+                            'id': e['id'],
+                            'title': f"🎬 {e.get('title', 'Video')[:45]}",
                             'source': 'yt'
                         })
-        except Exception as e:
-            logging.error(f"YT Search error: {e}")
-
-        # SoundCloud (yaxshilangan)
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                data = await asyncio.to_thread(ydl.extract_info, f"scsearch5:{query}", download=False)
-                for entry in data.get('entries', [])[:5]:
-                    if entry:
-                        results.append({
-                            'id': entry.get('webpage_url') or entry.get('id'),
-                            'title': f"🎧 {entry.get('title', 'No title')[:50]}",
-                            'source': 'sc'
-                        })
-        except Exception as e:
-            logging.error(f"SC Search error: {e}")
+        except:
+            pass
 
         return results[:8]
 
-    async def download(self, vid: str, source: str, is_video: bool):
-        timestamp = int(time.time())
-        ext = "mp4" if is_video else "mp3"
-        final_path = f"{self.path}/{timestamp}.{ext}"
-
-        ydl_opts = self.get_ydl_opts(PROXY)
-        ydl_opts.update({
-            'outtmpl': f"{self.path}/{timestamp}.%(ext)s",
-            'progress_hooks': [],
-        })
+    async def download(self, vid, source, is_video):
+        ts = int(time.time())
+        final = f"{self.path}/{ts}.{'mp4' if is_video else 'mp3'}"
+        
+        opts = {
+            'outtmpl': f"{self.path}/{ts}.%(ext)s",
+            'quiet': True,
+            'retries': 4,
+            'fragment_retries': 4
+        }
+        if PROXY:
+            opts['proxy'] = PROXY
 
         if is_video:
-            ydl_opts.update({
-                'format': 'bestvideo[height<=360]+bestaudio/best[height<=360]/best',
-                'merge_output_format': 'mp4',
-            })
+            opts['format'] = 'bestvideo[height<=360]+bestaudio/best'
+            opts['merge_output_format'] = 'mp4'
         else:
-            ydl_opts.update({
-                'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }]
-            })
+            opts['format'] = 'bestaudio/best'
+            opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
 
-        urls = []
-        if source == "yt":
-            urls = [
-                f"https://www.youtube.com/watch?v={vid}",
-                f"https://piped.video/watch?v={vid}",
-            ]
-        else:
-            urls = [vid if vid.startswith("http") else f"https://soundcloud.com/{vid}"]
+        urls = [f"https://www.youtube.com/watch?v={vid}"] if source == "yt" else [vid if vid.startswith("http") else f"https://soundcloud.com/{vid}"]
 
         for url in urls:
             try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                with yt_dlp.YoutubeDL(opts) as ydl:
                     await asyncio.to_thread(ydl.download, [url])
-                
-                if os.path.exists(final_path) and os.path.getsize(final_path) > 10000:
-                    return final_path
-            except Exception as e:
-                logging.warning(f"Failed {url}: {e}")
+                if os.path.exists(final) and os.path.getsize(final) > 5000:
+                    return final
+            except:
                 continue
-
-        raise Exception("Barcha usullar bilan yuklab bo'lmadi")
+        raise Exception("Yuklab bo'lmadi")
 
 engine = Engine()
 
-# ====================== HANDLERS ======================
 @dp.message(Command("start"))
-async def start(message: types.Message, state: FSMContext):
+async def start(m: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer(
-        f"👋 Salom <b>{message.from_user.first_name}</b>!\n\n"
-        "🤖 <b>Universal Media Bot</b>\n"
-        "✅ YouTube + SoundCloud\n"
-        "✅ MP3 192kbps\n"
-        "✅ Video 360p\n"
-        "✅ Anti-block",
-        reply_markup=main_menu()
-    )
+    await m.answer("👋 Salom! \nMusiqa yoki video yuklash uchun menyudan tanlang.", reply_markup=main_menu())
 
 @dp.message(F.text == "🎵 Musiqa topish")
-async def music_mode(message: types.Message, state: FSMContext):
+async def music_mode(m: types.Message, state: FSMContext):
     await state.set_state(SearchState.music)
-    await message.answer("🎵 Qo‘shiq yoki ijrochi nomini yozing:")
+    await m.answer("🎵 Qo‘shiq nomini yozing:")
 
 @dp.message(F.text == "🎬 Video topish")
-async def video_mode(message: types.Message, state: FSMContext):
+async def video_mode(m: types.Message, state: FSMContext):
     await state.set_state(SearchState.video)
-    await message.answer("🎬 Video nomini yozing:")
+    await m.answer("🎬 Video nomini yozing:")
 
 @dp.message(SearchState.music | SearchState.video)
-async def handle_search(message: types.Message, state: FSMContext):
-    is_video = (await state.get_state()) == SearchState.video.state
-    msg = await message.answer("🔍 Qidirilmoqda...")
+async def search_handler(m: types.Message, state: FSMContext):
+    is_video = await state.get_state() == SearchState.video.state
+    msg = await m.answer("🔍 Qidirilmoqda...")
 
-    results = await engine.search(message.text.strip())
-
+    results = await engine.search(m.text)
     if not results:
-        await msg.edit_text("❌ Hech narsa topilmadi. Boshqa nom bilan urinib ko‘ring.")
-        await state.clear()
+        await msg.edit_text("❌ Hech narsa topilmadi.")
         return
 
-    buttons = [
+    kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=r['title'], callback_data=f"dl|{'v' if is_video else 'm'}|{r['source']}|{r['id']}")]
         for r in results
-    ]
-
-    await msg.edit_text("✨ Natijalar:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    ])
+    await msg.edit_text("✨ Natijalar - tanlang:", reply_markup=kb)
 
 @dp.callback_query(F.data.startswith("dl|"))
-async def handle_download(callback: types.CallbackQuery):
-    _, mode, source, vid = callback.data.split('|', 3)
+async def download_handler(call: types.CallbackQuery):
+    _, mode, source, vid = call.data.split('|', 3)
     is_video = mode == 'v'
-
-    await callback.message.edit_text("🚀 Yuklanmoqda... (20-70 soniya kuting)")
+    await call.message.edit_text("🚀 Yuklanmoqda... Biroz kuting")
 
     try:
-        file_path = await engine.download(vid, source, is_video)
-
-        size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        path = await engine.download(vid, source, is_video)
+        size_mb = os.path.getsize(path) / (1024*1024)
         if size_mb > 49:
-            os.remove(file_path)
-            return await callback.message.answer("❌ Fayl 50MB dan katta.")
+            os.remove(path)
+            await call.message.answer("❌ Fayl 50MB dan katta")
+            return
 
-        file = FSInputFile(file_path)
+        file = FSInputFile(path)
         if is_video:
-            await callback.message.answer_video(file, caption="🎬 Tayyor! 360p")
+            await call.message.answer_video(file, caption="🎬 Tayyor (360p)")
         else:
-            await callback.message.answer_audio(file, caption="🎧 Tayyor MP3!")
-
-        os.remove(file_path)
-
+            await call.message.answer_audio(file, caption="🎧 Tayyor MP3!")
+        os.remove(path)
     except Exception as e:
-        logging.error(f"Download error: {e}")
-        await callback.message.answer("⚠️ Yuklab bo‘lmadi.\n\nProxy qo‘shing yoki keyinroq urinib ko‘ring.")
+        await call.message.answer("⚠️ Yuklab bo'lmadi.\nKeyinroq urinib ko'ring yoki proxy qo'shing.")
 
-# ====================== MAIN ======================
+# Keep-alive
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "Bot ishlayapti!"
-
-def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    return "Bot ishlayapti 🔥"
 
 async def main():
-    Thread(target=run_flask, daemon=True).start()
+    Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080))), daemon=True).start()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
