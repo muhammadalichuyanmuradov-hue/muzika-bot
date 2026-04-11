@@ -7,18 +7,25 @@ from aiogram.filters import Command
 from aiogram.types import FSInputFile, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.client.default import DefaultBotProperties
 import yt_dlp
 from flask import Flask
 from threading import Thread
 
+# ====================== CONFIG ======================
 TOKEN = os.environ.get("BOT_TOKEN")
 PROXY = os.environ.get("PROXY_URL")
 
-bot = Bot(token=TOKEN, parse_mode="HTML")
+# Yangi to'g'ri usul (aiogram 3.7+)
+bot = Bot(
+    token=TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
 dp = Dispatcher()
 
 logging.basicConfig(level=logging.INFO)
 
+# ====================== STATES ======================
 class SearchState(StatesGroup):
     music = State()
     video = State()
@@ -33,6 +40,7 @@ def main_menu():
         resize_keyboard=True
     )
 
+# ====================== ENGINE ======================
 class Engine:
     def __init__(self):
         self.path = "downloads"
@@ -54,8 +62,8 @@ class Engine:
                             'title': f"🎬 {e.get('title', 'Video')[:45]}",
                             'source': 'yt'
                         })
-        except:
-            pass
+        except Exception as e:
+            logging.error(f"Search error: {e}")
 
         return results[:8]
 
@@ -93,10 +101,11 @@ class Engine:
 
 engine = Engine()
 
+# ====================== HANDLERS ======================
 @dp.message(Command("start"))
 async def start(m: types.Message, state: FSMContext):
     await state.clear()
-    await m.answer("👋 Salom! \nMusiqa yoki video yuklash uchun menyudan tanlang.", reply_markup=main_menu())
+    await m.answer("👋 Salom! Musiqa yoki video yuklash uchun menyudan tanlang.", reply_markup=main_menu())
 
 @dp.message(F.text == "🎵 Musiqa topish")
 async def music_mode(m: types.Message, state: FSMContext):
@@ -132,7 +141,7 @@ async def download_handler(call: types.CallbackQuery):
 
     try:
         path = await engine.download(vid, source, is_video)
-        size_mb = os.path.getsize(path) / (1024*1024)
+        size_mb = os.path.getsize(path) / (1024 * 1024)
         if size_mb > 49:
             os.remove(path)
             await call.message.answer("❌ Fayl 50MB dan katta")
@@ -145,9 +154,10 @@ async def download_handler(call: types.CallbackQuery):
             await call.message.answer_audio(file, caption="🎧 Tayyor MP3!")
         os.remove(path)
     except Exception as e:
-        await call.message.answer("⚠️ Yuklab bo'lmadi.\nKeyinroq urinib ko'ring yoki proxy qo'shing.")
+        logging.error(f"Download error: {e}")
+        await call.message.answer("⚠️ Yuklab bo'lmadi.\nKeyinroq urinib ko'ring.")
 
-# Keep-alive
+# ====================== KEEP ALIVE ======================
 app = Flask(__name__)
 @app.route('/')
 def home():
