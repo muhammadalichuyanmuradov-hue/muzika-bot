@@ -29,8 +29,7 @@ class SearchState(StatesGroup):
 
 # --- KLAVIATURA (XATOSIZ) ---
 menu = ReplyKeyboardMarkup(
-    keyboard=,
-    ],
+    keyboard=
     resize_keyboard=True
 )
 
