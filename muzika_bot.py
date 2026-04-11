@@ -37,7 +37,8 @@ menu = ReplyKeyboardMarkup(
 class ImperatorEngine:
     def __init__(self):
         self.path = "downloads"
-        if not os.path.exists(self.path): os.makedirs(self.path)
+        if not os.path.exists(self.path):
+            os.makedirs(self.path)
 
     async def search_media(self, query, is_video=False):
         # Agar YouTube bloklasa, umumiy qidiruvga o'tadi
