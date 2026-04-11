@@ -12,20 +12,14 @@ import yt_dlp
 from flask import Flask
 from threading import Thread
 
-# ====================== CONFIG ======================
 TOKEN = os.environ.get("BOT_TOKEN")
 PROXY = os.environ.get("PROXY_URL")
 
-# Yangi to'g'ri usul (aiogram 3.7+)
-bot = Bot(
-    token=TOKEN,
-    default=DefaultBotProperties(parse_mode="HTML")
-)
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 
 logging.basicConfig(level=logging.INFO)
 
-# ====================== STATES ======================
 class SearchState(StatesGroup):
     music = State()
     video = State()
@@ -40,7 +34,6 @@ def main_menu():
         resize_keyboard=True
     )
 
-# ====================== ENGINE ======================
 class Engine:
     def __init__(self):
         self.path = "downloads"
@@ -52,30 +45,73 @@ class Engine:
         if PROXY:
             ydl_opts['proxy'] = PROXY
 
+        # 1. Bandcamp (eng yaxshi yangi qo'shimcha)
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                data = await asyncio.to_thread(ydl.extract_info, f"ytsearch5:{query}", download=False)
-                for e in data.get('entries', [])[:6]:
-                    if e and e.get('id'):
+                data = await asyncio.to_thread(ydl.extract_info, f"bandcampsearch:{query}", download=False)
+                for e in data.get('entries', [])[:4]:
+                    if e:
+                        results.append({
+                            'id': e.get('webpage_url'),
+                            'title': f"🎵 Bandcamp - {e.get('title', '')[:50]}",
+                            'source': 'bc'
+                        })
+        except:
+            pass
+
+        # 2. Mixcloud
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                data = await asyncio.to_thread(ydl.extract_info, f"mixcloudsearch:{query}", download=False)
+                for e in data.get('entries', [])[:3]:
+                    if e:
+                        results.append({
+                            'id': e.get('webpage_url'),
+                            'title': f"🎧 Mixcloud - {e.get('title', '')[:50]}",
+                            'source': 'mc'
+                        })
+        except:
+            pass
+
+        # 3. SoundCloud
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                data = await asyncio.to_thread(ydl.extract_info, f"scsearch5:{query}", download=False)
+                for e in data.get('entries', [])[:3]:
+                    if e:
+                        results.append({
+                            'id': e.get('webpage_url'),
+                            'title': f"🎧 SC - {e.get('title', '')[:50]}",
+                            'source': 'sc'
+                        })
+        except:
+            pass
+
+        # 4. YouTube (oxirgi o'rinda)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                data = await asyncio.to_thread(ydl.extract_info, f"ytsearch4:{query}", download=False)
+                for e in data.get('entries', [])[:2]:
+                    if e:
                         results.append({
                             'id': e['id'],
-                            'title': f"🎬 {e.get('title', 'Video')[:45]}",
+                            'title': f"🎬 YT - {e.get('title', '')[:50]}",
                             'source': 'yt'
                         })
-        except Exception as e:
-            logging.error(f"Search error: {e}")
+        except:
+            pass
 
-        return results[:8]
+        return results[:10]
 
-    async def download(self, vid, source, is_video):
+    async def download(self, url_or_id, source, is_video):
         ts = int(time.time())
         final = f"{self.path}/{ts}.{'mp4' if is_video else 'mp3'}"
         
         opts = {
             'outtmpl': f"{self.path}/{ts}.%(ext)s",
             'quiet': True,
-            'retries': 4,
-            'fragment_retries': 4
+            'retries': 6,
+            'fragment_retries': 6
         }
         if PROXY:
             opts['proxy'] = PROXY
@@ -87,13 +123,17 @@ class Engine:
             opts['format'] = 'bestaudio/best'
             opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
 
-        urls = [f"https://www.youtube.com/watch?v={vid}"] if source == "yt" else [vid if vid.startswith("http") else f"https://soundcloud.com/{vid}"]
+        # URL ni to'g'rilash
+        if source == 'yt':
+            urls = [f"https://www.youtube.com/watch?v={url_or_id}"]
+        else:
+            urls = [url_or_id]
 
         for url in urls:
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     await asyncio.to_thread(ydl.download, [url])
-                if os.path.exists(final) and os.path.getsize(final) > 5000:
+                if os.path.exists(final) and os.path.getsize(final) > 10000:
                     return final
             except:
                 continue
@@ -101,63 +141,58 @@ class Engine:
 
 engine = Engine()
 
-# ====================== HANDLERS ======================
+# ==================== HANDLERS ====================
 @dp.message(Command("start"))
 async def start(m: types.Message, state: FSMContext):
     await state.clear()
-    await m.answer("👋 Salom! Musiqa yoki video yuklash uchun menyudan tanlang.", reply_markup=main_menu())
+    await m.answer("👋 Salom!\nEndi YouTube kamroq, Bandcamp, Mixcloud va SoundCloud ko'proq ishlatiladi.", reply_markup=main_menu())
 
-@dp.message(F.text == "🎵 Musiqa topish")
-async def music_mode(m: types.Message, state: FSMContext):
-    await state.set_state(SearchState.music)
-    await m.answer("🎵 Qo‘shiq nomini yozing:")
-
-@dp.message(F.text == "🎬 Video topish")
-async def video_mode(m: types.Message, state: FSMContext):
-    await state.set_state(SearchState.video)
-    await m.answer("🎬 Video nomini yozing:")
+@dp.message(F.text.in_(["🎵 Musiqa topish", "🎬 Video topish"]))
+async def mode_handler(m: types.Message, state: FSMContext):
+    is_video = m.text == "🎬 Video topish"
+    await state.set_state(SearchState.video if is_video else SearchState.music)
+    await m.answer("🔍 Nom yozing:")
 
 @dp.message(SearchState.music | SearchState.video)
 async def search_handler(m: types.Message, state: FSMContext):
     is_video = await state.get_state() == SearchState.video.state
-    msg = await m.answer("🔍 Qidirilmoqda...")
+    msg = await m.answer("🔍 Qidirilmoqda... (Bandcamp, Mixcloud, SC, YT)")
 
     results = await engine.search(m.text)
     if not results:
-        await msg.edit_text("❌ Hech narsa topilmadi.")
+        await msg.edit_text("❌ Hech narsa topilmadi. Boshqa nom bilan urinib ko'ring.")
         return
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=r['title'], callback_data=f"dl|{'v' if is_video else 'm'}|{r['source']}|{r['id']}")]
         for r in results
     ])
-    await msg.edit_text("✨ Natijalar - tanlang:", reply_markup=kb)
+    await msg.edit_text("✨ Natijalar (tanlang):", reply_markup=kb)
 
 @dp.callback_query(F.data.startswith("dl|"))
 async def download_handler(call: types.CallbackQuery):
     _, mode, source, vid = call.data.split('|', 3)
     is_video = mode == 'v'
-    await call.message.edit_text("🚀 Yuklanmoqda... Biroz kuting")
+    await call.message.edit_text("🚀 Yuklanmoqda... (20-60 soniya)")
 
     try:
         path = await engine.download(vid, source, is_video)
         size_mb = os.path.getsize(path) / (1024 * 1024)
         if size_mb > 49:
             os.remove(path)
-            await call.message.answer("❌ Fayl 50MB dan katta")
+            await call.message.answer("❌ Fayl juda katta (>50MB)")
             return
 
         file = FSInputFile(path)
         if is_video:
-            await call.message.answer_video(file, caption="🎬 Tayyor (360p)")
+            await call.message.answer_video(file, caption="🎬 Tayyor!")
         else:
             await call.message.answer_audio(file, caption="🎧 Tayyor MP3!")
         os.remove(path)
-    except Exception as e:
-        logging.error(f"Download error: {e}")
-        await call.message.answer("⚠️ Yuklab bo'lmadi.\nKeyinroq urinib ko'ring.")
+    except:
+        await call.message.answer("⚠️ Yuklab bo'lmadi.\nBoshqa platforma yoki nom bilan urinib ko'ring.")
 
-# ====================== KEEP ALIVE ======================
+# Keep Alive
 app = Flask(__name__)
 @app.route('/')
 def home():
