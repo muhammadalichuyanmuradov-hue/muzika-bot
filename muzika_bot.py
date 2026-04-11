@@ -36,7 +36,8 @@ def menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🎵 Musiqa topish")],
-            [KeyboardButton(text="🎬 Video topish")]
+            [KeyboardButton(text="🎬 Video topish")],
+            [KeyboardButton(text="ℹ️ Yordam")]
         ],
         resize_keyboard=True
     )
@@ -48,48 +49,98 @@ class Engine:
         if not os.path.exists(self.path):
             os.makedirs(self.path)
 
+    # 🔍 MULTI SEARCH
     async def search(self, query):
-        ydl_opts = {'quiet': True, 'extract_flat': True}
+        results = []
+
+        # YouTube
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
                 data = await asyncio.to_thread(
                     ydl.extract_info,
-                    f"ytsearch10:{query}",
+                    f"ytsearch5:{query}",
                     download=False
                 )
-                return [
-                    {'id': v['id'], 'title': v['title'][:40]}
-                    for v in data['entries']
-                ]
+                for v in data['entries']:
+                    results.append({
+                        'id': v['id'],
+                        'title': "🎬 " + v['title'][:40],
+                        'source': 'yt'
+                    })
         except:
-            return []
+            pass
 
-    async def download(self, url, is_video):
+        # SoundCloud
+        try:
+            with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
+                data = await asyncio.to_thread(
+                    ydl.extract_info,
+                    f"scsearch5:{query}",
+                    download=False
+                )
+                for v in data['entries']:
+                    results.append({
+                        'id': v['id'],
+                        'title': "🎧 " + v['title'][:40],
+                        'source': 'sc'
+                    })
+        except:
+            pass
+
+        return results[:10]
+
+    # 🚀 ANTI-BLOCK DOWNLOAD
+    async def download(self, vid, source, is_video):
+        urls = []
+
+        if source == "yt":
+            urls = [
+                f"https://www.youtube.com/watch?v={vid}",
+                f"https://piped.video/watch?v={vid}",
+                f"https://yewtu.be/watch?v={vid}"
+            ]
+        elif source == "sc":
+            urls = [f"https://soundcloud.com/{vid}"]
+
         filename = f"{self.path}/{int(time.time())}.{'mp4' if is_video else 'mp3'}"
 
-        if is_video:
-            opts = {
-                'format': 'bestvideo[height<=360]+bestaudio/best',
-                'merge_output_format': 'mp4',
-                'outtmpl': filename,
-                'noplaylist': True
+        base_opts = {
+            'outtmpl': filename,
+            'quiet': True,
+            'noplaylist': True,
+            'retries': 3,
+            'fragment_retries': 3,
+            'geo_bypass': True,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0'
             }
+        }
+
+        if is_video:
+            base_opts.update({
+                'format': 'bestvideo[height<=360]+bestaudio/best',
+                'merge_output_format': 'mp4'
+            })
         else:
-            opts = {
+            base_opts.update({
                 'format': 'bestaudio/best',
-                'outtmpl': filename,
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-                'noplaylist': True
-            }
+                    'preferredquality': '192'
+                }]
+            })
 
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            await asyncio.to_thread(ydl.download, [url])
+        # 🔁 TRY ALL URLS
+        for url in urls:
+            try:
+                with yt_dlp.YoutubeDL(base_opts) as ydl:
+                    await asyncio.to_thread(ydl.download, [url])
+                return filename
+            except Exception as e:
+                print("❌ Failed:", url)
 
-        return filename
+        raise Exception("Download failed")
 
 engine = Engine()
 
@@ -99,16 +150,31 @@ async def start(m: types.Message, state: FSMContext):
     await state.clear()
     await m.answer(
         f"👋 Salom {m.from_user.first_name}!\n\n"
-        "🎧 Musiqa yoki 🎬 video yuklab beraman\n"
-        "👇 Quyidagidan tanlang:",
+        "🤖 MEN UNIVERSAL MEDIA BOTMAN!\n\n"
+        "🎧 Musiqa yuklab beraman\n"
+        "🎬 Video yuklab beraman (360p)\n"
+        "🚫 Block bo‘lsa ham ishlayman\n\n"
+        "👇 Boshlash uchun tanlang:",
         reply_markup=menu()
+    )
+
+# ---------- HELP ----------
+@dp.message(F.text == "ℹ️ Yordam")
+async def help_cmd(m: types.Message):
+    await m.answer(
+        "📌 BOT IMKONIYATLARI:\n\n"
+        "🎵 Musiqa topish → MP3 yuklaydi\n"
+        "🎬 Video topish → 360p video\n"
+        "🌐 YouTube + SoundCloud\n"
+        "🚀 Anti-block system\n\n"
+        "💡 Faqat nom yozing va tanlang!"
     )
 
 # ---------- MODE ----------
 @dp.message(F.text == "🎵 Musiqa topish")
 async def music(m: types.Message, state: FSMContext):
     await state.set_state(SearchState.music)
-    await m.answer("🎵 Musiqa nomini yozing:")
+    await m.answer("🎵 Qo‘shiq nomini yozing:")
 
 @dp.message(F.text == "🎬 Video topish")
 async def video(m: types.Message, state: FSMContext):
@@ -133,7 +199,7 @@ async def search(m: types.Message, state: FSMContext):
         inline_keyboard=[
             [InlineKeyboardButton(
                 text=r['title'],
-                callback_data=f"dl|{'v' if is_video else 'm'}|{r['id']}"
+                callback_data=f"dl|{'v' if is_video else 'm'}|{r['source']}|{r['id']}"
             )] for r in results
         ]
     )
@@ -144,43 +210,33 @@ async def search(m: types.Message, state: FSMContext):
 # ---------- DOWNLOAD ----------
 @dp.callback_query(F.data.startswith("dl|"))
 async def download(call: types.CallbackQuery):
-    _, t, vid = call.data.split('|')
+    _, t, source, vid = call.data.split('|')
     is_video = t == 'v'
-    url = f"https://www.youtube.com/watch?v={vid}"
 
     await call.message.edit_text("🚀 Yuklanmoqda...")
 
     try:
-        file_path = await engine.download(url, is_video)
+        file_path = await engine.download(vid, source, is_video)
 
-        # size check
         size = os.path.getsize(file_path) / (1024 * 1024)
         if size > 49:
             os.remove(file_path)
-            return await call.message.answer("❌ Fayl 50MB dan katta")
+            return await call.message.answer("❌ Fayl juda katta (>50MB)")
 
         file = FSInputFile(file_path)
 
         if is_video:
-            await call.message.answer_video(
-                file,
-                caption="🎬 Tayyor! 360p sifat"
-            )
+            await call.message.answer_video(file, caption="🎬 Tayyor! (360p)")
         else:
-            await call.message.answer_audio(
-                file,
-                caption="🎧 MP3 tayyor!"
-            )
+            await call.message.answer_audio(file, caption="🎧 Tayyor MP3!")
 
         os.remove(file_path)
+        await call.message.answer("🙏 Foydalanganingiz uchun rahmat!")
+
         await call.message.delete()
 
     except Exception as e:
-        await call.message.answer("⚠️ Xatolik yuz berdi")
-
-# ---------- EFFECT (typing) ----------
-async def typing_effect(chat_id):
-    await bot.send_chat_action(chat_id, "typing")
+        await call.message.answer("⚠️ Yuklab bo‘lmadi (block yoki xatolik)")
 
 # ---------- MAIN ----------
 async def main():
